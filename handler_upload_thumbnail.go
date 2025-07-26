@@ -1,7 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -28,10 +31,64 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	v, errGetVideo := cfg.db.GetVideo(videoID)
+	if errGetVideo == nil {
+		if v.CreateVideoParams.UserID != userID {
+			respondWithError(w,
+				http.StatusUnauthorized,
+				"error: the video is owened by other user",
+				errors.New("error: the video is owened by other user"))
+		}
 
-	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
+		fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
 
-	// TODO: implement the upload here
+		errParseMultipartForm := r.ParseMultipartForm(10 << 20 /* 10 Megabytes */)
+		if errParseMultipartForm != nil {
+			respondWithError(w,
+				http.StatusInternalServerError,
+				errParseMultipartForm.Error(),
+				errParseMultipartForm)
+		}
 
-	respondWithJSON(w, http.StatusOK, struct{}{})
+		file, fileHeader, errFormFile := r.FormFile("thumbnail")
+		if errParseMultipartForm != nil {
+			respondWithError(w,
+				http.StatusInternalServerError,
+				errFormFile.Error(),
+				errFormFile)
+		}
+
+		fileData, errReadAllFile := io.ReadAll(file)
+		if errReadAllFile != nil {
+			respondWithError(w,
+				http.StatusInternalServerError,
+				errReadAllFile.Error(),
+				errReadAllFile)
+		}
+
+		videoThumbnails[videoID] = thumbnail{
+			data:      fileData,
+			mediaType: fileHeader.Header.Get("Content-Type"),
+		}
+		log.Printf("%+v", r)
+		thumbnailURL := r.Header["Origin"][0] + "/api/thumbnails/" + videoIDString
+		v.ThumbnailURL = &thumbnailURL
+
+		errUpdateVideo := cfg.db.UpdateVideo(v)
+		if errUpdateVideo != nil {
+			respondWithError(w,
+				http.StatusInternalServerError,
+				errUpdateVideo.Error(),
+				errUpdateVideo)
+		}
+
+		respondWithJSON(w, http.StatusCreated, v)
+
+	} else {
+		respondWithError(w,
+			http.StatusInternalServerError,
+			errGetVideo.Error(),
+			errGetVideo)
+	}
+
 }
