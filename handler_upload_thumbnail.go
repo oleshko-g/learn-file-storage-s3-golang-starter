@@ -1,11 +1,13 @@
 package main
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -35,8 +37,8 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		if v.CreateVideoParams.UserID != userID {
 			respondWithError(w,
 				http.StatusUnauthorized,
-				"error: the video is owened by other user",
-				errors.New("error: the video is owened by other user"))
+				"the video is owened by other user",
+				errors.New("the video is owened by other user"))
 		}
 
 		fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
@@ -57,28 +59,35 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 				errFormFile)
 		}
 
-		fileData, errReadAllFile := io.ReadAll(file)
-		if errReadAllFile != nil {
+		if imageType, isImage := strings.CutPrefix(fileHeader.Header.Get("Content-Type"), "image/"); isImage {
+			//saveAsset
+			thumbnailFilePath := filepath.Join(cfg.assetsRoot, videoID.String()) + "." + imageType
+			fileOnDisk, saveFileToDisk := os.Create(thumbnailFilePath)
+			io.Copy(fileOnDisk, file)
+			if saveFileToDisk != nil {
+				respondWithError(w,
+					http.StatusInternalServerError,
+					saveFileToDisk.Error(),
+					saveFileToDisk)
+			}
+			thumbnailURL := r.Header.Get("Origin") + "/" + thumbnailFilePath
+			v.ThumbnailURL = &thumbnailURL
+
+			if errUpdateVideo := cfg.db.UpdateVideo(v); errUpdateVideo != nil {
+				respondWithError(w,
+					http.StatusInternalServerError,
+					errUpdateVideo.Error(),
+					errUpdateVideo)
+			}
+			respondWithJSON(w, http.StatusCreated, v)
+		} else if !isImage {
 			respondWithError(w,
-				http.StatusInternalServerError,
-				errReadAllFile.Error(),
-				errReadAllFile)
+				http.StatusBadRequest,
+				"not an image",
+				errors.New("not an image"))
 		}
 
-		thumbnailURL := "data:" + fileHeader.Header.Get("Content-Type") + ";base64," + base64.StdEncoding.EncodeToString(fileData)
-		v.ThumbnailURL = &thumbnailURL
-
-		errUpdateVideo := cfg.db.UpdateVideo(v)
-		if errUpdateVideo != nil {
-			respondWithError(w,
-				http.StatusInternalServerError,
-				errUpdateVideo.Error(),
-				errUpdateVideo)
-		}
-
-		respondWithJSON(w, http.StatusCreated, v)
-
-	} else {
+	} else if errGetVideo != nil {
 		respondWithError(w,
 			http.StatusInternalServerError,
 			errGetVideo.Error(),
