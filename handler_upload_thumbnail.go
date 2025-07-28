@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -59,9 +60,18 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 				errFormFile)
 		}
 
-		if imageType, isImage := strings.CutPrefix(fileHeader.Header.Get("Content-Type"), "image/"); isImage {
+		mediaType, _, errParseMediaType := mime.ParseMediaType(fileHeader.Header.Get("Content-Type"))
+		if errParseMediaType != nil {
+			respondWithError(w,
+				http.StatusInternalServerError,
+				errParseMediaType.Error(),
+				errParseMediaType)
+		}
+
+		if mediaType == "image/png" || mediaType == "image/jpeg" {
 			//saveAsset
-			thumbnailFilePath := filepath.Join(cfg.assetsRoot, videoID.String()) + "." + imageType
+			fileExtension, _ := strings.CutPrefix(mediaType, "image/")
+			thumbnailFilePath := filepath.Join(cfg.assetsRoot, videoID.String()) + "." + fileExtension
 			fileOnDisk, saveFileToDisk := os.Create(thumbnailFilePath)
 			io.Copy(fileOnDisk, file)
 			if saveFileToDisk != nil {
@@ -80,7 +90,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 					errUpdateVideo)
 			}
 			respondWithJSON(w, http.StatusCreated, v)
-		} else if !isImage {
+		} else {
 			respondWithError(w,
 				http.StatusBadRequest,
 				"not an image",
