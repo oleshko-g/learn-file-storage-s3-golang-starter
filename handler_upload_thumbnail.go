@@ -1,15 +1,10 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"mime"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -73,16 +68,12 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		if mediaType == "image/png" || mediaType == "image/jpeg" {
 			//saveAsset
 			fileExtension, _ := strings.CutPrefix(mediaType, "image/")
-			randomData := make([]byte, 32)
-			rand.Read(randomData)
-			thumbnailFilePath := filepath.Join(cfg.assetsRoot, base64.RawURLEncoding.EncodeToString(randomData)) + "." + fileExtension
-			fileOnDisk, saveFileToDisk := os.Create(thumbnailFilePath)
-			io.Copy(fileOnDisk, file)
-			if saveFileToDisk != nil {
+			thumbnailFilePath, errSaveFileToDisk := saveFileToDisk(file, cfg.assetsRoot, fileExtension)
+			if errSaveFileToDisk != nil {
 				respondWithError(w,
 					http.StatusInternalServerError,
-					saveFileToDisk.Error(),
-					saveFileToDisk)
+					errSaveFileToDisk.Error(),
+					errSaveFileToDisk)
 			}
 			thumbnailURL := r.Header.Get("Origin") + "/" + thumbnailFilePath
 			v.ThumbnailURL = &thumbnailURL
